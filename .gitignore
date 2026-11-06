@@ -9,9 +9,9 @@ dist/
 .env.local
 .env.*.local
 
-# Local SQLite files
-data/*.sqlite*
-data/
+# Local SQLite files (root directory only)
+/data/
+!src/data/
 
 # IDE & Editor files
 .vscode/

@@ -1,0 +1,24 @@
+# Dependencies
+node_modules/
+
+# Production build
+dist/
+
+# Local Environment Variables & Secrets
+.env
+.env.local
+.env.*.local
+
+# Local SQLite files
+data/*.sqlite*
+data/
+
+# IDE & Editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db

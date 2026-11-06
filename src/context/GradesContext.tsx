@@ -217,10 +217,22 @@ export const GradesProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         body: JSON.stringify(fullSubj)
       });
 
-      const data = await res.json().catch(() => ({}));
+      let errorMsg = `Server returned error (${res.status})`;
+      let data: any = {};
+      try {
+        const text = await res.text();
+        try {
+          data = JSON.parse(text);
+          errorMsg = data.details || data.error || errorMsg;
+        } catch {
+          if (text && text.length < 300) {
+            errorMsg = text;
+          }
+        }
+      } catch {}
 
       if (!res.ok || data.error) {
-        throw new Error(data.details || data.error || `Server returned error (${res.status})`);
+        throw new Error(errorMsg);
       }
 
       const savedId = data.id || id;

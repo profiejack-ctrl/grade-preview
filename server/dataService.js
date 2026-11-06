@@ -1,17 +1,29 @@
 import sqliteDb from './db.js';
 import * as neonDb from './neonDb.js';
 
+export function getDatabaseUrl() {
+  return (
+    process.env.DATABASE_URL ||
+    process.env.DATABASE_URL_UNPOOLED ||
+    process.env.POSTGRES_URL ||
+    process.env.POSTGRES_URL_NON_POOLING ||
+    process.env.POSTGRES_PRISMA_URL ||
+    process.env.NEON_DATABASE_URL ||
+    ''
+  ).trim();
+}
+
 export function isUsingNeon() {
-  return Boolean(process.env.DATABASE_URL);
+  return Boolean(getDatabaseUrl());
 }
 
 export function isVercelWithoutDb() {
-  return Boolean(process.env.VERCEL) && !process.env.DATABASE_URL;
+  return Boolean(process.env.VERCEL) && !isUsingNeon();
 }
 
 export async function getAllSubjects() {
   if (isUsingNeon()) {
-    const sql = neonDb.getNeonSql();
+    const sql = neonDb.getNeonSql(getDatabaseUrl());
     return await neonDb.getAllNeonSubjects(sql);
   }
   return sqliteDb.getAllSubjects();
@@ -20,12 +32,12 @@ export async function getAllSubjects() {
 export async function saveSubject(subject) {
   if (isVercelWithoutDb()) {
     throw new Error(
-      'DATABASE_URL is missing in your Vercel Project Settings! Please add your Neon connection string as DATABASE_URL in Vercel -> Settings -> Environment Variables so uploaded grades persist across all devices.'
+      'DATABASE_URL is missing or marked "Needs Attention" in your Vercel Project Settings! Please ensure DATABASE_URL has a value for Production and Redeploy.'
     );
   }
 
   if (isUsingNeon()) {
-    const sql = neonDb.getNeonSql();
+    const sql = neonDb.getNeonSql(getDatabaseUrl());
     await neonDb.ensureNeonSchema(sql);
     return await neonDb.saveNeonSubject(sql, subject);
   }
@@ -34,7 +46,7 @@ export async function saveSubject(subject) {
 
 export async function deleteSubject(id) {
   if (isUsingNeon()) {
-    const sql = neonDb.getNeonSql();
+    const sql = neonDb.getNeonSql(getDatabaseUrl());
     return await neonDb.deleteNeonSubject(sql, id);
   }
   return sqliteDb.deleteSubject(id);
@@ -42,7 +54,7 @@ export async function deleteSubject(id) {
 
 export async function resetDatabase() {
   if (isUsingNeon()) {
-    const sql = neonDb.getNeonSql();
+    const sql = neonDb.getNeonSql(getDatabaseUrl());
     await neonDb.clearAllNeon(sql);
     return await neonDb.getAllNeonSubjects(sql);
   }
@@ -60,9 +72,9 @@ export async function getDbHealth() {
       status: vercelMissingDb ? 'warning' : 'ok',
       database: vercelMissingDb ? 'missing-database-url' : (isNeon ? 'neon-postgres' : 'sqlite'),
       isVercel: Boolean(process.env.VERCEL),
-      hasDatabaseUrl: Boolean(process.env.DATABASE_URL),
+      hasDatabaseUrl: isNeon,
       message: vercelMissingDb
-        ? 'DATABASE_URL is not set in Vercel Environment Variables. Cloud persistence is disabled.'
+        ? 'DATABASE_URL is marked Needs Attention or not assigned to Production in Vercel Environment Variables.'
         : undefined,
       subjectCount: subjects.length,
       subjects: subjects.map(s => ({

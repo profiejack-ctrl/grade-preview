@@ -3,11 +3,20 @@ import seedSubjects from './seedData.js';
 
 let isSchemaInitialized = false;
 
-export function getNeonSql(connectionString = process.env.DATABASE_URL) {
-  if (!connectionString) {
-    throw new Error('DATABASE_URL is not defined');
+export function getNeonSql(connectionString) {
+  const url = connectionString || (
+    process.env.DATABASE_URL ||
+    process.env.DATABASE_URL_UNPOOLED ||
+    process.env.POSTGRES_URL ||
+    process.env.POSTGRES_URL_NON_POOLING ||
+    process.env.NEON_DATABASE_URL ||
+    ''
+  ).trim();
+
+  if (!url) {
+    throw new Error('Neon database connection string (DATABASE_URL) is not defined');
   }
-  return neon(connectionString);
+  return neon(url);
 }
 
 export async function ensureNeonSchema(sql) {

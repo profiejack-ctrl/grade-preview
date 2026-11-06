@@ -1,4 +1,5 @@
 import * as pdfjsLib from 'pdfjs-dist';
+import { refineExtractedText } from './gemini';
 import { ExtractedPdfSummary, StudentGradeRecord } from '../types';
 
 // Polyfill for Uint8Array.prototype.toHex in case older browser runtimes lack it
@@ -357,5 +358,6 @@ export async function extractTextFromPdf(file: File): Promise<ExtractedPdfSummar
     }
   }
 
-  return parseGradeTableText(fullExtractedText);
+  const refinedText = await refineExtractedText(fullExtractedText);
+  return parseGradeTableText(refinedText);
 }

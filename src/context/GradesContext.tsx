@@ -6,10 +6,11 @@ interface GradesContextType {
   currentUser: User | null;
   subjects: Subject[];
   dbEngine: string;
+  dbMessage?: string;
   login: (id: string, pass: string) => { success: boolean; message?: string };
   logout: () => void;
-  addSubject: (newSubj: Omit<Subject, 'id' | 'uploadedAt'>) => string;
-  deleteSubject: (subjectId: string) => void;
+  addSubject: (newSubj: Omit<Subject, 'id' | 'uploadedAt'>) => Promise<{ success: boolean; id?: string; error?: string }>;
+  deleteSubject: (subjectId: string) => Promise<void>;
   resetToDefault: () => void;
   getStudentSubjects: (studentId: string) => { subject: Subject; record: StudentGradeRecord }[];
   getAllStudents: () => { studentId: string; name: string; section: string; sex: string }[];
@@ -35,6 +36,7 @@ export const GradesProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [dbEngine, setDbEngine] = useState<string>('sqlite');
+  const [dbMessage, setDbMessage] = useState<string | undefined>(undefined);
 
   const [customPasswords, setCustomPasswords] = useState<Record<string, string>>(() => {
     try {
@@ -65,6 +67,7 @@ export const GradesProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         .then(r => r.json())
         .then(h => {
           if (h.database) setDbEngine(h.database);
+          if (h.message) setDbMessage(h.message);
         })
         .catch(() => {});
     } catch (e) {
@@ -197,7 +200,9 @@ export const GradesProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     setCurrentUser(null);
   };
 
-  const addSubject = (newSubj: Omit<Subject, 'id' | 'uploadedAt'>): string => {
+  const addSubject = async (
+    newSubj: Omit<Subject, 'id' | 'uploadedAt'>
+  ): Promise<{ success: boolean; id?: string; error?: string }> => {
     const id = 'subj-' + Date.now() + '-' + Math.random().toString(36).substring(2, 7);
     const fullSubj: Subject = {
       ...newSubj,
@@ -205,38 +210,50 @@ export const GradesProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       uploadedAt: new Date().toISOString()
     };
 
-    // Optimistic state update
-    setSubjects(prev => {
-      const existingIndex = prev.findIndex(
-        s => s.code.toUpperCase() === fullSubj.code.toUpperCase() && s.section === fullSubj.section
-      );
-      if (existingIndex >= 0) {
-        const updated = [...prev];
-        updated[existingIndex] = { ...fullSubj, id: prev[existingIndex].id };
-        return updated;
+    try {
+      const res = await fetch('/api/subjects', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(fullSubj)
+      });
+
+      const data = await res.json().catch(() => ({}));
+
+      if (!res.ok || data.error) {
+        throw new Error(data.details || data.error || `Server returned error (${res.status})`);
       }
-      return [fullSubj, ...prev];
-    });
 
-    // Save to SQLite database
-    fetch('/api/subjects', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(fullSubj)
-    })
-      .then(r => r.json())
-      .then(() => refreshData())
-      .catch(err => console.error('Failed persisting subject to SQLite:', err));
+      const savedId = data.id || id;
+      const savedSubj: Subject = { ...fullSubj, id: savedId };
 
-    return id;
+      setSubjects(prev => {
+        const existingIndex = prev.findIndex(
+          s => s.code.toUpperCase() === savedSubj.code.toUpperCase() && s.section === savedSubj.section
+        );
+        if (existingIndex >= 0) {
+          const updated = [...prev];
+          updated[existingIndex] = savedSubj;
+          return updated;
+        }
+        return [savedSubj, ...prev];
+      });
+
+      await refreshData();
+      return { success: true, id: savedId };
+    } catch (err: any) {
+      console.error('Failed saving subject to database:', err);
+      return { success: false, error: err.message || 'Failed saving subject to database' };
+    }
   };
 
-  const deleteSubject = (subjectId: string) => {
+  const deleteSubject = async (subjectId: string): Promise<void> => {
     setSubjects(prev => prev.filter(s => s.id !== subjectId));
-
-    fetch('/api/subjects/' + subjectId, { method: 'DELETE' })
-      .then(() => refreshData())
-      .catch(err => console.error('Failed deleting subject from SQLite:', err));
+    try {
+      await fetch('/api/subjects/' + subjectId, { method: 'DELETE' });
+    } catch (err) {
+      console.error('Failed deleting subject:', err);
+    }
+    await refreshData();
   };
 
   const resetToDefault = async () => {
@@ -292,6 +309,7 @@ export const GradesProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         currentUser,
         subjects,
         dbEngine,
+        dbMessage,
         login,
         logout,
         addSubject,

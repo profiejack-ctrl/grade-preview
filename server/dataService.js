@@ -5,6 +5,10 @@ export function isUsingNeon() {
   return Boolean(process.env.DATABASE_URL);
 }
 
+export function isVercelWithoutDb() {
+  return Boolean(process.env.VERCEL) && !process.env.DATABASE_URL;
+}
+
 export async function getAllSubjects() {
   if (isUsingNeon()) {
     const sql = neonDb.getNeonSql();
@@ -14,6 +18,12 @@ export async function getAllSubjects() {
 }
 
 export async function saveSubject(subject) {
+  if (isVercelWithoutDb()) {
+    throw new Error(
+      'DATABASE_URL is missing in your Vercel Project Settings! Please add your Neon connection string as DATABASE_URL in Vercel -> Settings -> Environment Variables so uploaded grades persist across all devices.'
+    );
+  }
+
   if (isUsingNeon()) {
     const sql = neonDb.getNeonSql();
     await neonDb.ensureNeonSchema(sql);
@@ -42,11 +52,18 @@ export async function resetDatabase() {
 
 export async function getDbHealth() {
   const isNeon = isUsingNeon();
+  const vercelMissingDb = isVercelWithoutDb();
+
   try {
     const subjects = await getAllSubjects();
     return {
-      status: 'ok',
-      database: isNeon ? 'neon-postgres' : 'sqlite',
+      status: vercelMissingDb ? 'warning' : 'ok',
+      database: vercelMissingDb ? 'missing-database-url' : (isNeon ? 'neon-postgres' : 'sqlite'),
+      isVercel: Boolean(process.env.VERCEL),
+      hasDatabaseUrl: Boolean(process.env.DATABASE_URL),
+      message: vercelMissingDb
+        ? 'DATABASE_URL is not set in Vercel Environment Variables. Cloud persistence is disabled.'
+        : undefined,
       subjectCount: subjects.length,
       subjects: subjects.map(s => ({
         code: s.code,

@@ -121,7 +121,14 @@ export async function getAllNeonSubjects(sql) {
 }
 
 export async function saveNeonSubject(sql, subject) {
-  const id = subject.id || ('subj-' + Date.now() + '-' + Math.random().toString(36).substring(2, 7));
+  // Check if subject with this code & section already exists to prevent duplicate entries
+  const existing = await sql`
+    SELECT id FROM subjects
+    WHERE UPPER(code) = UPPER(${subject.code}) AND section = ${subject.section || 'BSIT 21001'}
+    LIMIT 1
+  `;
+
+  const id = subject.id || (existing[0]?.id) || ('subj-' + Date.now() + '-' + Math.random().toString(36).substring(2, 7));
   const uploadedAt = subject.uploadedAt || new Date().toISOString();
 
   await sql`
@@ -161,30 +168,42 @@ export async function saveNeonSubject(sql, subject) {
   await sql`DELETE FROM student_grades WHERE subject_id = ${id}`;
 
   if (Array.isArray(subject.records) && subject.records.length > 0) {
-    for (const rec of subject.records) {
-      await sql`
-        INSERT INTO student_grades (
-          subject_id, no, student_id, name, sex,
-          prelim_score, prelim_weighted, midterm_score, midterm_weighted,
-          finals_score, finals_weighted, average, equivalent, remarks
-        ) VALUES (
-          ${id},
-          ${rec.no || 0},
-          ${rec.studentId},
-          ${rec.name},
-          ${rec.sex || 'Male'},
-          ${rec.prelimScore || 0},
-          ${rec.prelimWeighted || 0},
-          ${rec.midtermScore || 0},
-          ${rec.midtermWeighted || 0},
-          ${rec.finalsScore || 0},
-          ${rec.finalsWeighted || 0},
-          ${rec.average || 0},
-          ${rec.equivalent || 5.0},
-          ${rec.remarks || 'Passed'}
-        )
-      `;
+    const params = [];
+    const rowPlaceholders = [];
+
+    for (let i = 0; i < subject.records.length; i++) {
+      const rec = subject.records[i];
+      const offset = i * 14;
+      rowPlaceholders.push(
+        `($${offset + 1}, $${offset + 2}, $${offset + 3}, $${offset + 4}, $${offset + 5}, $${offset + 6}, $${offset + 7}, $${offset + 8}, $${offset + 9}, $${offset + 10}, $${offset + 11}, $${offset + 12}, $${offset + 13}, $${offset + 14})`
+      );
+      params.push(
+        id,
+        rec.no || (i + 1),
+        rec.studentId,
+        rec.name,
+        rec.sex || 'Male',
+        rec.prelimScore || 0,
+        rec.prelimWeighted || 0,
+        rec.midtermScore || 0,
+        rec.midtermWeighted || 0,
+        rec.finalsScore || 0,
+        rec.finalsWeighted || 0,
+        rec.average || 0,
+        rec.equivalent || 5.0,
+        rec.remarks || 'Passed'
+      );
     }
+
+    const batchQuery = `
+      INSERT INTO student_grades (
+        subject_id, no, student_id, name, sex,
+        prelim_score, prelim_weighted, midterm_score, midterm_weighted,
+        finals_score, finals_weighted, average, equivalent, remarks
+      ) VALUES ${rowPlaceholders.join(', ')}
+    `;
+
+    await sql(batchQuery, params);
   }
 
   return id;

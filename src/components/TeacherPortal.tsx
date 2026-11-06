@@ -24,11 +24,13 @@ import {
 } from 'lucide-react';
 
 export const TeacherPortal: React.FC = () => {
-  const { subjects, addSubject, deleteSubject, resetToDefault, dbEngine } = useGrades();
+  const { subjects, addSubject, deleteSubject, resetToDefault, dbEngine, dbMessage } = useGrades();
   const [activeSubjectId, setActiveSubjectId] = useState<string>(subjects[0]?.id || '');
   const [isUploading, setIsUploading] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
   const [extractError, setExtractError] = useState<string | null>(null);
+  const [commitError, setCommitError] = useState<string | null>(null);
   const [previewData, setPreviewData] = useState<ExtractedPdfSummary | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [filterRemarks, setFilterRemarks] = useState<'all' | 'Passed' | 'Failed'>('all');
@@ -108,10 +110,12 @@ export const TeacherPortal: React.FC = () => {
   };
 
   // Commit extracted preview into active subjects
-  const handleCommitPreview = () => {
+  const handleCommitPreview = async () => {
     if (!previewData) return;
+    setIsSubmitting(true);
+    setCommitError(null);
 
-    const newId = addSubject({
+    const result = await addSubject({
       code: previewData.subjectCode,
       title: previewData.subjectTitle,
       section: previewData.section,
@@ -126,14 +130,20 @@ export const TeacherPortal: React.FC = () => {
       records: previewData.records
     });
 
-    setActiveSubjectId(newId);
-    setPreviewData(null);
-    setPastedText('');
-    setShowTextPaste(false);
+    setIsSubmitting(false);
+
+    if (result.success && result.id) {
+      setActiveSubjectId(result.id);
+      setPreviewData(null);
+      setPastedText('');
+      setShowTextPaste(false);
+    } else {
+      setCommitError(result.error || 'Failed saving subject to the cloud database.');
+    }
   };
 
   // Quick preset template loader for demo
-  const handleLoadSampleSubject = (type: 'IPT' | 'ITE' | 'DSA') => {
+  const handleLoadSampleSubject = async (type: 'IPT' | 'ITE' | 'DSA') => {
     if (type === 'DSA') {
       const sampleRecords: StudentGradeRecord[] = [
         { no: 1, studentId: '250102531', name: 'Abayon, Shawn Daniel', sex: 'Male', prelimScore: 90, prelimWeighted: 27.0, midtermScore: 88, midtermWeighted: 26.4, finalsScore: 85, finalsWeighted: 34.0, average: 87.40, equivalent: 2.00, remarks: 'Passed' },
@@ -142,7 +152,7 @@ export const TeacherPortal: React.FC = () => {
         { no: 4, studentId: '250100664', name: 'Belmi, Xena Lewis', sex: 'Female', prelimScore: 94, prelimWeighted: 28.2, midtermScore: 92, midtermWeighted: 27.6, finalsScore: 91, finalsWeighted: 36.4, average: 92.20, equivalent: 1.50, remarks: 'Passed' }
       ];
 
-      addSubject({
+      await addSubject({
         code: 'CS201',
         title: 'Data Structures and Algorithms',
         section: 'BSIT 21001',
@@ -194,10 +204,17 @@ export const TeacherPortal: React.FC = () => {
         </div>
 
         <div className="flex items-center gap-2">
-          <div className="px-2.5 py-1.5 rounded-xl bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-xs font-semibold flex items-center gap-1.5">
-            <Database className="w-3.5 h-3.5 text-emerald-400" />
-            <span>{dbEngine === 'neon-postgres' ? 'Neon Database' : 'SQLite Database'}</span>
-          </div>
+          {dbEngine === 'missing-database-url' ? (
+            <div className="px-2.5 py-1.5 rounded-xl bg-rose-500/10 text-rose-400 border border-rose-500/20 text-xs font-semibold flex items-center gap-1.5 animate-pulse">
+              <AlertCircle className="w-3.5 h-3.5 text-rose-400" />
+              <span>Neon Not Connected</span>
+            </div>
+          ) : (
+            <div className="px-2.5 py-1.5 rounded-xl bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-xs font-semibold flex items-center gap-1.5">
+              <Database className="w-3.5 h-3.5 text-emerald-400" />
+              <span>{dbEngine === 'neon-postgres' ? 'Neon Database' : 'SQLite Database'}</span>
+            </div>
+          )}
 
           <button
             onClick={resetToDefault}
@@ -208,6 +225,27 @@ export const TeacherPortal: React.FC = () => {
           </button>
         </div>
       </div>
+
+      {/* Vercel Missing DATABASE_URL Warning Banner */}
+      {dbEngine === 'missing-database-url' && (
+        <div className="bg-amber-500/10 border border-amber-500/30 rounded-3xl p-5 text-amber-200 text-xs flex items-start gap-3.5 shadow-xl shadow-amber-500/5">
+          <AlertCircle className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />
+          <div className="space-y-1.5">
+            <div className="font-bold text-amber-300 text-sm">
+              Cloud Database Connection Required
+            </div>
+            <p className="text-amber-200/90 leading-relaxed">
+              This app is deployed on Vercel, but <code className="bg-amber-950/70 border border-amber-500/30 px-1.5 py-0.5 rounded text-amber-300 font-mono">DATABASE_URL</code> has not been configured in your Vercel Project Settings yet. Without it, uploaded grades cannot be saved to the cloud and <strong>will not appear on students' mobile phones</strong>.
+            </p>
+            <div className="pt-1 text-amber-300 font-semibold flex flex-col sm:flex-row sm:items-center gap-2">
+              <span>Fix in 30 seconds:</span>
+              <span className="font-normal text-amber-200/90">
+                Go to <strong>Vercel &rarr; Settings &rarr; Environment Variables</strong>, add your Neon connection string as <code className="bg-amber-950/70 border border-amber-500/30 px-1 py-0.5 rounded text-amber-300 font-mono">DATABASE_URL</code>, and click <strong>Redeploy</strong>.
+              </span>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* PDF Upload Section (Teacher Request Highlight) */}
       <div className="bg-gradient-to-b from-slate-900 to-slate-900/90 border border-slate-800 rounded-3xl p-5 sm:p-6 shadow-xl shadow-black/30">
@@ -337,12 +375,33 @@ export const TeacherPortal: React.FC = () => {
 
               <button
                 onClick={handleCommitPreview}
-                className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs shadow-lg shadow-emerald-600/30 transition flex items-center gap-1.5"
+                disabled={isSubmitting}
+                className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white font-bold text-xs shadow-lg shadow-emerald-600/30 transition flex items-center gap-1.5"
               >
-                <CheckCircle2 className="w-4 h-4" />
-                <span>Save & Publish</span>
+                {isSubmitting ? (
+                  <>
+                    <RefreshCw className="w-4 h-4 animate-spin" />
+                    <span>Saving to Database...</span>
+                  </>
+                ) : (
+                  <>
+                    <CheckCircle2 className="w-4 h-4" />
+                    <span>Save & Publish</span>
+                  </>
+                )}
               </button>
             </div>
+
+            {/* Commit Error Banner */}
+            {commitError && (
+              <div className="p-3.5 rounded-xl bg-rose-500/20 border border-rose-500/40 text-rose-200 text-xs flex items-start gap-2.5">
+                <AlertCircle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
+                <div>
+                  <div className="font-bold text-rose-100">Failed to Save to Database</div>
+                  <div className="text-rose-200/90 mt-0.5 leading-relaxed">{commitError}</div>
+                </div>
+              </div>
+            )}
 
             {/* Quick table sample */}
             <div className="max-h-40 overflow-y-auto border border-amber-500/20 rounded-xl bg-slate-950/60 p-2">

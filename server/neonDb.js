@@ -212,7 +212,11 @@ export async function saveNeonSubject(sql, subject) {
       ) VALUES ${rowPlaceholders.join(', ')}
     `;
 
-    await sql(batchQuery, params);
+    if (typeof sql.query === 'function') {
+      await sql.query(batchQuery, params);
+    } else {
+      await (sql.unsafe || sql)(batchQuery, params);
+    }
   }
 
   return id;

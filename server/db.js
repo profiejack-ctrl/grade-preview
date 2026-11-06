@@ -1,4 +1,3 @@
-import { DatabaseSync } from 'node:sqlite';
 import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
@@ -6,59 +5,71 @@ import { fileURLToPath } from 'url';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const DATA_DIR = path.join(__dirname, '..', 'data');
-if (!fs.existsSync(DATA_DIR)) {
-  fs.mkdirSync(DATA_DIR, { recursive: true });
+let db = null;
+
+try {
+  const sqlite = await import('node:sqlite');
+  if (sqlite && sqlite.DatabaseSync) {
+    const DATA_DIR = path.join(__dirname, '..', 'data');
+    if (!fs.existsSync(DATA_DIR)) {
+      try {
+        fs.mkdirSync(DATA_DIR, { recursive: true });
+      } catch (_) {}
+    }
+    const DB_PATH = path.join(DATA_DIR, 'grades.sqlite');
+    db = new sqlite.DatabaseSync(DB_PATH);
+
+    // Enable WAL mode and foreign keys
+    db.exec(`
+      PRAGMA journal_mode = WAL;
+      PRAGMA foreign_keys = ON;
+
+      CREATE TABLE IF NOT EXISTS subjects (
+        id TEXT PRIMARY KEY,
+        code TEXT NOT NULL,
+        title TEXT NOT NULL,
+        section TEXT NOT NULL,
+        units INTEGER NOT NULL DEFAULT 3,
+        semester TEXT NOT NULL DEFAULT '1st Semester',
+        academic_year TEXT NOT NULL DEFAULT '2026-2027',
+        instructor TEXT NOT NULL,
+        program_head TEXT,
+        institution TEXT DEFAULT 'Bestlink College of the Philippines',
+        college TEXT DEFAULT 'College Computer Studies',
+        grading_system TEXT DEFAULT 'Professional Subjects (*Laboratory)',
+        uploaded_at TEXT NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS student_grades (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        subject_id TEXT NOT NULL REFERENCES subjects(id) ON DELETE CASCADE,
+        no INTEGER,
+        student_id TEXT NOT NULL,
+        name TEXT NOT NULL,
+        sex TEXT NOT NULL,
+        prelim_score REAL NOT NULL,
+        prelim_weighted REAL NOT NULL,
+        midterm_score REAL NOT NULL,
+        midterm_weighted REAL NOT NULL,
+        finals_score REAL NOT NULL,
+        finals_weighted REAL NOT NULL,
+        average REAL NOT NULL,
+        equivalent REAL NOT NULL,
+        remarks TEXT NOT NULL,
+        UNIQUE(subject_id, student_id)
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_student_grades_sid ON student_grades(student_id);
+      CREATE INDEX IF NOT EXISTS idx_subjects_code ON subjects(code);
+    `);
+  }
+} catch (e) {
+  // node:sqlite is not supported on this platform/Node runtime (e.g. Vercel)
+  db = null;
 }
 
-const DB_PATH = path.join(DATA_DIR, 'grades.sqlite');
-const db = new DatabaseSync(DB_PATH);
-
-// Enable WAL mode and foreign keys
-db.exec(`
-  PRAGMA journal_mode = WAL;
-  PRAGMA foreign_keys = ON;
-
-  CREATE TABLE IF NOT EXISTS subjects (
-    id TEXT PRIMARY KEY,
-    code TEXT NOT NULL,
-    title TEXT NOT NULL,
-    section TEXT NOT NULL,
-    units INTEGER NOT NULL DEFAULT 3,
-    semester TEXT NOT NULL DEFAULT '1st Semester',
-    academic_year TEXT NOT NULL DEFAULT '2026-2027',
-    instructor TEXT NOT NULL,
-    program_head TEXT,
-    institution TEXT DEFAULT 'Bestlink College of the Philippines',
-    college TEXT DEFAULT 'College Computer Studies',
-    grading_system TEXT DEFAULT 'Professional Subjects (*Laboratory)',
-    uploaded_at TEXT NOT NULL
-  );
-
-  CREATE TABLE IF NOT EXISTS student_grades (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    subject_id TEXT NOT NULL REFERENCES subjects(id) ON DELETE CASCADE,
-    no INTEGER,
-    student_id TEXT NOT NULL,
-    name TEXT NOT NULL,
-    sex TEXT NOT NULL,
-    prelim_score REAL NOT NULL,
-    prelim_weighted REAL NOT NULL,
-    midterm_score REAL NOT NULL,
-    midterm_weighted REAL NOT NULL,
-    finals_score REAL NOT NULL,
-    finals_weighted REAL NOT NULL,
-    average REAL NOT NULL,
-    equivalent REAL NOT NULL,
-    remarks TEXT NOT NULL,
-    UNIQUE(subject_id, student_id)
-  );
-
-  CREATE INDEX IF NOT EXISTS idx_student_grades_sid ON student_grades(student_id);
-  CREATE INDEX IF NOT EXISTS idx_subjects_code ON subjects(code);
-`);
-
 export function getAllSubjects() {
+  if (!db) return [];
   const subjectRows = db.prepare('SELECT * FROM subjects ORDER BY uploaded_at DESC').all();
   const selectGrades = db.prepare('SELECT * FROM student_grades WHERE subject_id = ? ORDER BY no ASC');
 
@@ -98,6 +109,8 @@ export function getAllSubjects() {
 }
 
 export function saveSubject(subject) {
+  if (!db) throw new Error('SQLite database is unavailable in this environment');
+
   const insertSubj = db.prepare(`
     INSERT INTO subjects (
       id, code, title, section, units, semester, academic_year,
@@ -173,10 +186,12 @@ export function saveSubject(subject) {
 }
 
 export function deleteSubject(subjectId) {
+  if (!db) return;
   db.prepare('DELETE FROM subjects WHERE id = ?').run(subjectId);
 }
 
 export function clearAll() {
+  if (!db) return;
   db.exec(`
     DELETE FROM student_grades;
     DELETE FROM subjects;

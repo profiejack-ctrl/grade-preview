@@ -1,5 +1,19 @@
-import sqliteDb from './db.js';
 import * as neonDb from './neonDb.js';
+import seedSubjects from './seedData.js';
+
+let sqliteDb = null;
+async function getSqlite() {
+  if (process.env.VERCEL) return null;
+  if (!sqliteDb) {
+    try {
+      const mod = await import('./db.js');
+      sqliteDb = mod.default || mod;
+    } catch (_) {
+      sqliteDb = null;
+    }
+  }
+  return sqliteDb;
+}
 
 export function getDatabaseUrl() {
   return (
@@ -23,10 +37,27 @@ export function isVercelWithoutDb() {
 
 export async function getAllSubjects() {
   if (isUsingNeon()) {
-    const sql = neonDb.getNeonSql(getDatabaseUrl());
-    return await neonDb.getAllNeonSubjects(sql);
+    try {
+      const sql = neonDb.getNeonSql(getDatabaseUrl());
+      const neonSubjects = await neonDb.getAllNeonSubjects(sql);
+      if (Array.isArray(neonSubjects) && neonSubjects.length > 0) {
+        return neonSubjects;
+      }
+    } catch (err) {
+      console.error('Neon getAllSubjects error:', err);
+    }
+    return seedSubjects;
   }
-  return sqliteDb.getAllSubjects();
+
+  const sqlite = await getSqlite();
+  if (sqlite) {
+    try {
+      const local = sqlite.getAllSubjects();
+      if (Array.isArray(local) && local.length > 0) return local;
+    } catch (_) {}
+  }
+
+  return seedSubjects;
 }
 
 export async function saveSubject(subject) {
@@ -41,7 +72,13 @@ export async function saveSubject(subject) {
     await neonDb.ensureNeonSchema(sql);
     return await neonDb.saveNeonSubject(sql, subject);
   }
-  return sqliteDb.saveSubject(subject);
+
+  const sqlite = await getSqlite();
+  if (sqlite) {
+    return sqlite.saveSubject(subject);
+  }
+
+  throw new Error('No persistent database configured');
 }
 
 export async function deleteSubject(id) {
@@ -49,7 +86,11 @@ export async function deleteSubject(id) {
     const sql = neonDb.getNeonSql(getDatabaseUrl());
     return await neonDb.deleteNeonSubject(sql, id);
   }
-  return sqliteDb.deleteSubject(id);
+
+  const sqlite = await getSqlite();
+  if (sqlite) {
+    return sqlite.deleteSubject(id);
+  }
 }
 
 export async function resetDatabase() {
@@ -58,8 +99,14 @@ export async function resetDatabase() {
     await neonDb.clearAllNeon(sql);
     return await neonDb.getAllNeonSubjects(sql);
   }
-  sqliteDb.clearAll();
-  return sqliteDb.getAllSubjects();
+
+  const sqlite = await getSqlite();
+  if (sqlite) {
+    sqlite.clearAll();
+    return sqlite.getAllSubjects();
+  }
+
+  return seedSubjects;
 }
 
 export async function getDbHealth() {
